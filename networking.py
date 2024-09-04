@@ -29,9 +29,7 @@ class Server:
         self.thread.start()
 
     def _setup_socket(self, address: Address):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.bind(address.as_tuple())
-        self.socket.listen()
+        self.socket = socket.create_server(address.as_tuple())
         self.socket.setblocking(False)
 
     def get_address(self) -> Address:
@@ -94,8 +92,7 @@ class Client:
         self.is_running = True
         self.handle = handle
 
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect(address.as_tuple())
+        self.socket = socket.create_connection(address.as_tuple(), timeout=0.1)
         self.socket.setblocking(False)
 
         self.pickler, self.unpickler = pickle_socket(self.socket)
