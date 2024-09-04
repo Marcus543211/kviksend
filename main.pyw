@@ -42,8 +42,9 @@ class Chat(ttk.Frame):
             self.address = address
         else:
             # Host if not given an address
-            self.server = Server()
-            self.address = self.server.get_address()
+            self.server = Server(Address('0.0.0.0', 0))
+            port = self.server.get_address().port
+            self.address = Address('127.0.0.1', port)
 
         self.client = Client(self.address, self.handle_message)
         self.closing = False

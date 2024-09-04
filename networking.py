@@ -22,20 +22,21 @@ class Address:
 
 
 class Server:
-    def __init__(self):
+    def __init__(self, address: Address):
         self.is_running = True
-        self.address = None
-
-        self.thread = Thread(target=self._server)
+        self._setup_socket(address)
+        self.thread = Thread(target=self._server, daemon=True)
         self.thread.start()
+
+    def _setup_socket(self, address: Address):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.bind(address.as_tuple())
+        self.socket.listen()
+        self.socket.setblocking(False)
 
     def get_address(self) -> Address:
         """Gets the IP-address and port of the server"""
-        # Wait for the other thread to select an address
-        while not self.address:
-            sleep(SLEEP_TIME)
-
-        return self.address
+        return Address(*self.socket.getsockname())
 
     def get_clients(self):
         """Gets the IP-addresses for all connected clients"""
@@ -45,55 +46,47 @@ class Server:
         """Closes the server"""
         self.is_running = False
         self.thread.join()
+        self.socket.close()
 
     def _server(self):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            address = socket.gethostbyname(socket.gethostname())
+        self.clients = {}
 
-            sock.bind((address, 0))
-            sock.listen()
-            sock.setblocking(False)
+        while self.is_running:
+            sleep(SLEEP_TIME)
 
-            self.address = Address(*sock.getsockname())
+            dead_clients = []
+            messages = []
 
-            self.clients = {}
+            # Accept new connections
+            try:
+                conn, addr = self.socket.accept()
+            except BlockingIOError:
+                pass
+            else:
+                addr = Address(*addr)
+                pickler, unpickler = pickle_socket(conn)
+                self.clients[addr] = (conn, pickler, unpickler)
 
-            while self.is_running:
-                sleep(SLEEP_TIME)
-
-                dead_clients = []
-                messages = []
-
-                # Accept new connections
+            # Check for messages
+            for addr, (_, _, unpickler) in self.clients.items():
                 try:
-                    conn, addr = sock.accept()
-                except BlockingIOError:
+                    obj = unpickler.load()
+                except TypeError:
                     pass
+                except EOFError:
+                    dead_clients.append(addr)
                 else:
-                    addr = Address(*addr)
-                    pickler, unpickler = pickle_socket(conn)
-                    self.clients[addr] = (conn, pickler, unpickler)
+                    messages.append((addr, obj))
 
-                # Check for messages
-                for addr, (_, _, unpickler) in self.clients.items():
-                    try:
-                        obj = unpickler.load()
-                    except TypeError:
-                        pass
-                    except EOFError:
-                        dead_clients.append(addr)
-                    else:
-                        messages.append((addr, obj))
+            # Remove dead clients
+            for addr in dead_clients:
+                self.clients[addr][0].close()
+                del self.clients[addr]
 
-                # Remove dead clients
-                for addr in dead_clients:
-                    self.clients[addr][0].close()
-                    del self.clients[addr]
-
-                # Send messages
-                for message in messages:
-                    for _, pickler, _ in self.clients.values():
-                        pickler.dump(message)
+            # Send messages
+            for message in messages:
+                for _, pickler, _ in self.clients.values():
+                    pickler.dump(message)
 
 
 class Client:
@@ -101,13 +94,13 @@ class Client:
         self.is_running = True
         self.handle = handle
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect(address.as_tuple())
-        self.sock.setblocking(False)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect(address.as_tuple())
+        self.socket.setblocking(False)
 
-        self.pickler, self.unpickler = pickle_socket(self.sock)
+        self.pickler, self.unpickler = pickle_socket(self.socket)
 
-        self.thread = Thread(target=self._recive)
+        self.thread = Thread(target=self._receive, daemon=True)
         self.thread.start()
 
     def send(self, obj):
@@ -116,19 +109,15 @@ class Client:
 
     def get_address(self):
         """Gets the IP-address and port"""
-        return Address(*self.sock.getsockname())
+        return Address(*self.socket.getsockname())
 
     def close(self):
         """Disconnects the client"""
         self.is_running = False
-        self.sock.close()
+        self.thread.join()
+        self.socket.close()
 
-        try:
-            self.thread.join()
-        except RuntimeError:
-            pass
-
-    def _recive(self):
+    def _receive(self):
         while self.is_running:
             sleep(SLEEP_TIME)
 
