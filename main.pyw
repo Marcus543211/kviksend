@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import socket
 from time import sleep
 
 import tkinter as tk
@@ -8,6 +9,8 @@ from tkinter.simpledialog import askstring
 
 from networking import Server, Client, Address
 
+
+PORT = 33669
 
 class NetworkCommand:
     pass
@@ -42,9 +45,8 @@ class Chat(ttk.Frame):
             self.address = address
         else:
             # Host if not given an address
-            self.server = Server(Address('0.0.0.0', 0))
-            port = self.server.get_address().port
-            self.address = Address('127.0.0.1', port)
+            self.server = Server(Address('0.0.0.0', PORT))
+            self.address = Address('127.0.0.1', PORT)
 
         self.client = Client(self.address, self.handle_message)
         self.closing = False
@@ -128,7 +130,7 @@ class App(tk.Tk):
         self.notebook.bind('<<NotebookTabChanged>>', self.switched_tab)
 
         self.chats = []
-        self.host()
+        self.join_friend_or_host()
 
     def switched_tab(self, event):
         tab = self.notebook.index('current')
@@ -136,6 +138,22 @@ class App(tk.Tk):
             self.host()
         elif tab == self.notebook.index(self.join_tab):
             self.join()
+
+    def join_friend_or_host(self):
+        with open('friends.txt') as file:
+            friends = file.read().strip().split()
+        
+        for friend in friends:
+            try:
+                address = socket.gethostbyname(friend)
+                self.add_chat(Address(address, PORT))
+                break
+            except socket.gaierror:
+                pass
+            except TimeoutError:
+                pass
+        else:
+            self.host()
 
     def join(self):
         address = askstring('Join', 'Enter the address that you want to join:')
